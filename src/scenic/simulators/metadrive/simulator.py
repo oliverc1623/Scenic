@@ -3,6 +3,10 @@
 try:
     from metadrive.component.traffic_participants.pedestrian import Pedestrian
     from metadrive.component.vehicle.vehicle_type import DefaultVehicle
+    from metadrive.policy.idm_policy import IDMPolicy
+    from metadrive.component.navigation_module.edge_network_navigation import EdgeNetworkNavigation
+    from metadrive.component.navigation_module.node_network_navigation import NodeNetworkNavigation
+    from metadrive.component.navigation_module.base_navigation import BaseNavigation
 except ImportError as e:
     raise ModuleNotFoundError(
         "Metadrive is required. Please install the 'metadrive-simulator' package (and sumolib) or use scenic[metadrive]."
@@ -20,6 +24,8 @@ from scenic.domains.driving.controllers import (
 )
 from scenic.domains.driving.simulators import DrivingSimulation, DrivingSimulator
 import scenic.simulators.metadrive.utils as utils
+import numpy as np
+import math
 
 
 class MetaDriveSimulator(DrivingSimulator):
@@ -98,6 +104,11 @@ class MetaDriveSimulation(DrivingSimulation):
         self.scenic_offset = scenic_offset
         self.sumo_map_boundary = sumo_map_boundary
         self.film_size = film_size
+        self.observation = []
+        self.actions = dict()
+        self.info = {}
+        self.previous_gap_platoon1 = None
+        self.previous_gap_platoon2 = None
         super().__init__(scene, timestep=timestep, **kwargs)
 
     def createObjectInSimulator(self, obj):
@@ -194,8 +205,8 @@ class MetaDriveSimulation(DrivingSimulation):
 
         # Special handling for the ego vehicle
         ego_obj = self.scene.objects[0]
-        action = ego_obj._collect_action()
-        self.client.step(action)  # Apply action in the simulator
+        self.client.step([self.actions[0], self.actions[1]]) # Apply action in the simulator
+        # self.client.step(ego_obj._collect_action())
         ego_obj._reset_control()
 
         # Render the scene in 2D if needed
@@ -210,6 +221,71 @@ class MetaDriveSimulation(DrivingSimulation):
             elapsed_time = end_time - start_time
             if elapsed_time < self.timestep:
                 time.sleep(self.timestep - elapsed_time)
+
+    def get_obs(self):
+        obs = []
+        for obj in self.scene.objects:
+            x = obj.x
+            y = obj.y
+            xv = obj.velocity[0]
+            yv = obj.velocity[1]
+            obs.append([x, y, xv, yv])
+        self.observation = np.array(obs).astype(np.float32)
+        return self.observation
+
+    def get_info(self):
+        return self.info
+    
+    def get_reward(self):
+        gap_attacker = (self.scene.objects[0].x - self.scene.objects[1].x) - 4.5
+        gap_platoon1 = (self.scene.objects[1].x - self.scene.objects[2].x) - 4.5
+        gap_platoon2 = (self.scene.objects[2].x - self.scene.objects[3].x) - 4.5
+
+        attacker_crashed = gap_attacker < 0
+        platoon_crashed = gap_platoon1 < 0 or gap_platoon2 < 0
+
+        self.info['attacker_crashed'] = False
+        self.info['counter_example_found'] = False
+        self.info['distances'] = {
+            "gap_attacker": gap_attacker,
+            "gap_platoon1": gap_platoon1,
+            "gap_platoon2": gap_platoon2
+        }
+
+        if attacker_crashed:
+            self.info['attacker_crashed'] = True
+            crash_reward = -10
+        elif platoon_crashed and not attacker_crashed:
+            self.info['counter_example_found'] = True
+            crash_reward = 10
+        else:
+            crash_reward = 0
+
+        # Shaping rewards (only if no one has already crashed)
+        shaping_reward = 0
+        if not attacker_crashed and not platoon_crashed:
+            # Encourage smaller platoon gaps
+            if self.previous_gap_platoon1 is not None:
+                delta1 = self.previous_gap_platoon1 - gap_platoon1  # positive if gap is shrinking
+                shaping_reward += 0.1 * delta1
+            if self.previous_gap_platoon2 is not None:
+                delta2 = self.previous_gap_platoon2 - gap_platoon2
+                shaping_reward += 0.1 * delta2
+            
+            # Discourage attacker from tailgating too closely
+            # For instance, if gap_attacker < 2.0, give a small negative
+            if gap_attacker < 2.0:
+                shaping_reward -= 0.1
+
+        self.previous_gap_platoon1 = gap_platoon1
+        self.previous_gap_platoon2 = gap_platoon2
+
+        self.info["dense_reward_signals"] = {
+            "platoon_gap_reward": shaping_reward,
+        }
+
+        reward = crash_reward + shaping_reward
+        return reward
 
     def destroy(self):
         if self.client and self.client.engine:
