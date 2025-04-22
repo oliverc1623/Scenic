@@ -205,7 +205,7 @@ class MetaDriveSimulation(DrivingSimulation):
 
         # Special handling for the ego vehicle
         ego_obj = self.scene.objects[0]
-        self.client.step([self.actions[0], self.actions[1]]) # Apply action in the simulator
+        self.client.step([self.actions[0], 1.0]) # Apply action in the simulator
         # self.client.step(ego_obj._collect_action())
         ego_obj._reset_control()
 
@@ -235,19 +235,32 @@ class MetaDriveSimulation(DrivingSimulation):
         return self.observation
 
     def get_info(self):
+        # followers = [v for v in self.scene.objects[1:]
+        #      if v.isVehicle and v.lane == self.ego._lane and v.position.x < self.ego.position.x]  # noqa: SLF001
+
+        # headways = [self.ego.position.x - v.position.x - 4.5 for v in followers]  # bumper to bumper
+        # rel_vel  = [v.speed - self.ego.speed for v in followers]                  # positive if closing
+        # ttc      = [h / rv if rv > 0.1 else np.inf for h, rv in zip(headways, rel_vel, strict=False)]
+
+        # self.info["h_min"] = min(headways) if headways else np.inf
+        # self.info["ttc_min"] = min(ttc) if ttc else np.inf
         return self.info
 
     def get_reward(self):
         ego = self.scene.objects[0]
+
+        sparse_reward = 0
         if ego.metaDriveActor.crash_vehicle:
             # If the ego vehicle has crashed, return a negative reward
-            return -1.0
+            sparse_reward = -1.0
 
         for obj in self.scene.objects[1:]:
-            if obj.isVehicle and obj.metaDriveActor.crash_vehicle:
-                return 1.0
+            if obj.isVehicle and obj.metaDriveActor.crash_vehicle and not ego.metaDriveActor.crash_vehicle:
+                sparse_reward =  1.0
 
-        return 0.0
+        off_road = ego._lane is None  # noqa: SLF001
+        r_off = -0.1 if off_road else 0.0
+        return sparse_reward + r_off
 
     def destroy(self):
         if self.client and self.client.engine:
