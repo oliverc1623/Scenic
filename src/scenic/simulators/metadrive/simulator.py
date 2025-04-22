@@ -229,63 +229,25 @@ class MetaDriveSimulation(DrivingSimulation):
             y = obj.y
             xv = obj.velocity[0]
             yv = obj.velocity[1]
-            obs.append([x, y, xv, yv])
+            yaw = obj.heading
+            obs.append([x, y, xv, yv, yaw])
         self.observation = np.array(obs).astype(np.float32)
         return self.observation
 
     def get_info(self):
         return self.info
-    
+
     def get_reward(self):
-        gap_attacker = (self.scene.objects[0].x - self.scene.objects[1].x) - 4.5
-        gap_platoon1 = (self.scene.objects[1].x - self.scene.objects[2].x) - 4.5
-        gap_platoon2 = (self.scene.objects[2].x - self.scene.objects[3].x) - 4.5
+        ego = self.scene.objects[0]
+        if ego.metaDriveActor.crash_vehicle:
+            # If the ego vehicle has crashed, return a negative reward
+            return -1.0
 
-        attacker_crashed = gap_attacker < 0
-        platoon_crashed = gap_platoon1 < 0 or gap_platoon2 < 0
+        for obj in self.scene.objects[1:]:
+            if obj.isVehicle and obj.metaDriveActor.crash_vehicle:
+                return 1.0
 
-        self.info['attacker_crashed'] = False
-        self.info['counter_example_found'] = False
-        self.info['distances'] = {
-            "gap_attacker": gap_attacker,
-            "gap_platoon1": gap_platoon1,
-            "gap_platoon2": gap_platoon2
-        }
-
-        if attacker_crashed:
-            self.info['attacker_crashed'] = True
-            crash_reward = -10
-        elif platoon_crashed and not attacker_crashed:
-            self.info['counter_example_found'] = True
-            crash_reward = 10
-        else:
-            crash_reward = 0
-
-        # Shaping rewards (only if no one has already crashed)
-        shaping_reward = 0
-        if not attacker_crashed and not platoon_crashed:
-            # Encourage smaller platoon gaps
-            if self.previous_gap_platoon1 is not None:
-                delta1 = self.previous_gap_platoon1 - gap_platoon1  # positive if gap is shrinking
-                shaping_reward += 0.1 * delta1
-            if self.previous_gap_platoon2 is not None:
-                delta2 = self.previous_gap_platoon2 - gap_platoon2
-                shaping_reward += 0.1 * delta2
-            
-            # Discourage attacker from tailgating too closely
-            # For instance, if gap_attacker < 2.0, give a small negative
-            if gap_attacker < 2.0:
-                shaping_reward -= 0.1
-
-        self.previous_gap_platoon1 = gap_platoon1
-        self.previous_gap_platoon2 = gap_platoon2
-
-        self.info["dense_reward_signals"] = {
-            "platoon_gap_reward": shaping_reward,
-        }
-
-        reward = crash_reward + shaping_reward
-        return reward
+        return 0.0
 
     def destroy(self):
         if self.client and self.client.engine:
