@@ -235,15 +235,12 @@ class MetaDriveSimulation(DrivingSimulation):
         return self.observation
 
     def get_info(self):
-        # followers = [v for v in self.scene.objects[1:]
-        #      if v.isVehicle and v.lane == self.ego._lane and v.position.x < self.ego.position.x]  # noqa: SLF001
+        ego = self.scene.objects[0]
+        followers = [v for v in self.scene.objects[1:]
+             if v.isVehicle and v._lane == ego._lane and v.position.x < ego.position.x]  # noqa: SLF001
 
-        # headways = [self.ego.position.x - v.position.x - 4.5 for v in followers]  # bumper to bumper
-        # rel_vel  = [v.speed - self.ego.speed for v in followers]                  # positive if closing
-        # ttc      = [h / rv if rv > 0.1 else np.inf for h, rv in zip(headways, rel_vel, strict=False)]
-
-        # self.info["h_min"] = min(headways) if headways else np.inf
-        # self.info["ttc_min"] = min(ttc) if ttc else np.inf
+        headways = [ego.position.x - v.position.x - 4.5 for v in followers]  # bumper to bumper
+        self.info["h_min"] = min(headways) if headways else 0
         return self.info
 
     def get_reward(self):
@@ -259,8 +256,11 @@ class MetaDriveSimulation(DrivingSimulation):
                 sparse_reward =  1.0
 
         off_road = ego._lane is None  # noqa: SLF001
-        r_off = -0.1 if off_road else 0.0
-        return sparse_reward + r_off
+        r_off = -1.0 if off_road else 0.0
+        reward = sparse_reward + r_off
+        if self.info["h_min"] > 0:
+            reward = reward - self.info["h_min"] / 10.0
+        return reward
 
     def destroy(self):
         if self.client and self.client.engine:
