@@ -123,6 +123,14 @@ class MetaDriveSimulation(DrivingSimulation):
         )
         converted_heading = utils.scenicToMetaDriveHeading(obj.heading)
 
+        vehicle_config = {}
+        if obj.isVehicle:
+            vehicle_config["spawn_position_heading"] = [
+                converted_position,
+                converted_heading,
+            ]
+            vehicle_config["spawn_velocity"] = [obj.velocity.x, obj.velocity.y]
+
         if not self.defined_ego:
             decision_repeat = math.ceil(self.timestep / 0.02)
             physics_world_step_size = self.timestep / decision_repeat
@@ -133,12 +141,7 @@ class MetaDriveSimulation(DrivingSimulation):
                     decision_repeat=decision_repeat,
                     physics_world_step_size=physics_world_step_size,
                     use_render=self.render3D,
-                    vehicle_config={
-                        "spawn_position_heading": [
-                            converted_position,
-                            converted_heading,
-                        ],
-                    },
+                    vehicle_config=vehicle_config,
                     use_mesh_terrain=self.render3D,
                     log_level=logging.CRITICAL,
                 )
@@ -205,7 +208,7 @@ class MetaDriveSimulation(DrivingSimulation):
 
         # Special handling for the ego vehicle
         ego_obj = self.scene.objects[0]
-        self.client.step([self.actions[0], 1.0]) # Apply action in the simulator
+        self.client.step([self.actions[0], self.actions[1]]) # Apply action in the simulator
         # self.client.step(ego_obj._collect_action())
         ego_obj._reset_control()
 
@@ -253,13 +256,13 @@ class MetaDriveSimulation(DrivingSimulation):
 
         for obj in self.scene.objects[1:]:
             if obj.isVehicle and obj.metaDriveActor.crash_vehicle and not ego.metaDriveActor.crash_vehicle:
-                sparse_reward =  1.0
+                sparse_reward +=  1.0
 
         off_road = ego._lane is None  # noqa: SLF001
-        r_off = -1.0 if off_road else 0.0
+        r_off = -10.0 if off_road else 0.0
         reward = sparse_reward + r_off
-        if self.info["h_min"] > 0:
-            reward = reward - self.info["h_min"] / 10.0
+        # if self.info["h_min"] > 0:
+        #     reward = reward - self.info["h_min"] / 10.0
         return reward
 
     def destroy(self):
