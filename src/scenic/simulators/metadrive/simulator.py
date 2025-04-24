@@ -159,7 +159,7 @@ class MetaDriveSimulation(DrivingSimulation):
         if obj.isVehicle:
             metaDriveActor = self.client.engine.agent_manager.spawn_object(
                 DefaultVehicle,
-                vehicle_config=dict(vehicle_config=dict(spawn_velocity = [0, 0])),
+                vehicle_config=dict(spawn_velocity = [0, 0]),
                 position=converted_position,
                 heading=converted_heading,
             )
