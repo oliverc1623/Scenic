@@ -130,6 +130,11 @@ class MetaDriveSimulation(DrivingSimulation):
                 converted_heading,
             ]
             vehicle_config["spawn_velocity"] = [obj.velocity.x, obj.velocity.y]
+            vehicle_config["spawn_velocity"] = [obj.velocity.x, obj.velocity.y]
+            vehicle_config["lane_line_detector"] = dict(
+                num_lasers=10,
+                distance=20,
+            )
 
         if not self.defined_ego:
             decision_repeat = math.ceil(self.timestep / 0.02)
@@ -159,7 +164,7 @@ class MetaDriveSimulation(DrivingSimulation):
         if obj.isVehicle:
             metaDriveActor = self.client.engine.agent_manager.spawn_object(
                 DefaultVehicle,
-                vehicle_config=dict(spawn_velocity = [0, 0]),
+                vehicle_config=dict(spawn_velocity = [0, 0], random_color=True),
                 position=converted_position,
                 heading=converted_heading,
             )
@@ -226,16 +231,9 @@ class MetaDriveSimulation(DrivingSimulation):
                 time.sleep(self.timestep - elapsed_time)
 
     def get_obs(self):
-        obs = []
-        for obj in self.scene.objects:
-            x = obj.x
-            y = obj.y
-            xv = obj.velocity[0]
-            yv = obj.velocity[1]
-            yaw = obj.heading
-            obs.append([x, y, xv, yv, yaw])
-        self.observation = np.array(obs).astype(np.float32)
-        return self.observation
+        ego = self.scene.objects[0]
+        o = self.client.get_single_observation().observe(ego.metaDriveActor)
+        return o
 
     def get_info(self):
         ego = self.scene.objects[0]

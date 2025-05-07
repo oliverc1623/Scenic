@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 
 from metadrive.envs import BaseEnv
 from metadrive.manager.sumo_map_manager import SumoMapManager
-from metadrive.obs.observation_base import DummyObservation
+from metadrive.obs.state_obs import LidarStateObservation
 
 from scenic.core.vectors import Vector
 
@@ -94,7 +94,7 @@ class DriveEnv(BaseEnv):
 
     def get_single_observation(self):
         """Dummy observation function."""
-        return DummyObservation()
+        return LidarStateObservation(self.config)
 
     def setup_engine(self):
         """Setup the engine for MetaDrive."""
