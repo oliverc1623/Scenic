@@ -236,31 +236,43 @@ class MetaDriveSimulation(DrivingSimulation):
         return o
 
     def get_info(self):
-        ego = self.scene.objects[0]
-        followers = [v for v in self.scene.objects[1:]
-             if v.isVehicle and v._lane == ego._lane and v.position.x < ego.position.x]  # noqa: SLF001
-
-        headways = [ego.position.x - v.position.x - 4.5 for v in followers]  # bumper to bumper
-        self.info["h_min"] = min(headways) if headways else 0
         return self.info
+
+    def clip(self, a, low, high):
+        return min(max(a, low), high)
 
     def get_reward(self):
         ego = self.scene.objects[0]
 
-        sparse_reward = 0
+        if ego._lane is None:
+            return -5
+
+        # reward for moving forward in correct lane direction
+        road = ego._road
+        positive_road = 1 if (road is not None and road.forwardLanes) else -1
+
+        last_position = utils.metadriveToScenicPosition(ego.metaDriveActor.last_position, self.scenic_offset)
+        current_position = utils.metadriveToScenicPosition(ego.metaDriveActor.position, self.scenic_offset)
+        lateral_now = ego._lane.centerline.signedDistanceTo(current_position)
+
+        # reward for lane keeping
+        lane_width = 3.5
+        lateral_factor = self.clip(1 - 2 * abs(lateral_now) / lane_width, 0.0, 1.0)
+
+        reward = 0.0
+
+        reward += 1.0 * (current_position[0] - last_position[0]) * lateral_factor * positive_road
+        reward += 0.1 * (ego.speed / 22.5) * positive_road
+
         if ego.metaDriveActor.crash_vehicle:
-            # If the ego vehicle has crashed, return a negative reward
-            sparse_reward = -1.0
+            reward -= 5.0
+        elif ego.metaDriveActor.crash_object:
+            reward -= 5.0
+        elif ego.metaDriveActor.crash_sidewalk:
+            reward -= 5.0
+        elif ego.position.x >= 450: # TODO: self.config["init spawn"] and self.config["goal point"]
+            reward += 10.0 # success reward
 
-        for obj in self.scene.objects[1:]:
-            if obj.isVehicle and obj.metaDriveActor.crash_vehicle and not ego.metaDriveActor.crash_vehicle:
-                sparse_reward +=  1.0
-
-        off_road = ego._lane is None  # noqa: SLF001
-        r_off = -10.0 if off_road else 0.0
-        reward = sparse_reward + r_off
-        # if self.info["h_min"] > 0:
-        #     reward = reward - self.info["h_min"] / 10.0
         return reward
 
     def destroy(self):
