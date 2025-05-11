@@ -213,8 +213,8 @@ class MetaDriveSimulation(DrivingSimulation):
 
         # Special handling for the ego vehicle
         ego_obj = self.scene.objects[0]
-        self.client.step([self.actions[0], self.actions[1]]) # Apply action in the simulator
-        # self.client.step(ego_obj._collect_action())
+        # self.client.step([self.actions[0], self.actions[1]]) # Apply action in the simulator
+        self.client.step(ego_obj._collect_action())
         ego_obj._reset_control()
 
         # Render the scene in 2D if needed
@@ -262,7 +262,7 @@ class MetaDriveSimulation(DrivingSimulation):
         reward = 0.0
 
         reward += 2.0 * (current_position[0] - last_position[0]) * lateral_factor * positive_road
-        reward += 0.1 * (ego.speed / 22.5) * positive_road
+        reward += 0.1 * (ego.speed / 10) * positive_road
 
         if ego.metaDriveActor.crash_vehicle:
             reward -= 5.0
@@ -270,7 +270,7 @@ class MetaDriveSimulation(DrivingSimulation):
             reward -= 5.0
         elif ego.metaDriveActor.crash_sidewalk:
             reward -= 5.0
-        elif ego.position.x >= 450: # TODO: self.config["init spawn"] and self.config["goal point"]
+        elif ego.position.x >= 300: # TODO: self.config["init spawn"] and self.config["goal point"]
             reward += 10.0 # success reward
 
         return reward
