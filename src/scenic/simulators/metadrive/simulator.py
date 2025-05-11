@@ -261,7 +261,7 @@ class MetaDriveSimulation(DrivingSimulation):
 
         reward = 0.0
 
-        reward += 1.0 * (current_position[0] - last_position[0]) * lateral_factor * positive_road
+        reward += 2.0 * (current_position[0] - last_position[0]) * lateral_factor * positive_road
         reward += 0.1 * (ego.speed / 22.5) * positive_road
 
         if ego.metaDriveActor.crash_vehicle:
