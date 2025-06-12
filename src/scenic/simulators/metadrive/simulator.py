@@ -213,7 +213,7 @@ class MetaDriveSimulation(DrivingSimulation):
 
         # Special handling for the ego vehicle
         ego_obj = self.scene.objects[0]
-        self.client.step(ego_obj._collect_action())
+        self.client.step([self.actions[0], self.actions[1]])
         ego_obj._reset_control()
 
         # Render the scene in 2D if needed
