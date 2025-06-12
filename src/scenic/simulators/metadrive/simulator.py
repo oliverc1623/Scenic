@@ -213,8 +213,7 @@ class MetaDriveSimulation(DrivingSimulation):
 
         # Special handling for the ego vehicle
         ego_obj = self.scene.objects[0]
-        self.client.step([self.actions[0], self.actions[1]]) # Apply action in the simulator
-        # self.client.step(ego_obj._collect_action())
+        self.client.step(ego_obj._collect_action())
         ego_obj._reset_control()
 
         # Render the scene in 2D if needed
@@ -243,37 +242,7 @@ class MetaDriveSimulation(DrivingSimulation):
 
     def get_reward(self):
         ego = self.scene.objects[0]
-
-        if ego._lane is None:
-            return -5
-
-        # reward for moving forward in correct lane direction
-        road = ego._road
-        positive_road = 1 if (road is not None and road.forwardLanes) else -1
-
-        last_position = utils.metadriveToScenicPosition(ego.metaDriveActor.last_position, self.scenic_offset)
-        current_position = utils.metadriveToScenicPosition(ego.metaDriveActor.position, self.scenic_offset)
-        lateral_now = ego._lane.centerline.signedDistanceTo(current_position)
-
-        # reward for lane keeping
-        lane_width = 3.5
-        lateral_factor = self.clip(1 - 2 * abs(lateral_now) / lane_width, 0.0, 1.0)
-
-        reward = 0.0
-
-        reward += 2.0 * (current_position[0] - last_position[0]) * lateral_factor * positive_road
-        reward += 0.1 * (ego.speed / 10) * positive_road
-
-        if ego.metaDriveActor.crash_vehicle:
-            reward -= 5.0
-        elif ego.metaDriveActor.crash_object:
-            reward -= 5.0
-        elif ego.metaDriveActor.crash_sidewalk:
-            reward -= 5.0
-        elif ego.position.x >= 300: # TODO: self.config["init spawn"] and self.config["goal point"]
-            reward += 10.0 # success reward
-
-        return reward
+        return ego.reward
 
     def destroy(self):
         if self.client and self.client.engine:

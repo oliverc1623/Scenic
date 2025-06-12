@@ -88,6 +88,10 @@ class MetaDriveActor(DrivingObject):
                         or retrieving simulation data (position, velocity, etc.).
     """
     metaDriveActor: None
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.reward = 0
+        self.last_position = None
 
 class Vehicle(Vehicle, Steers, MetaDriveActor):
     def __init__(self, *args, **kwargs):
