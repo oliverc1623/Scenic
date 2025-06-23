@@ -52,6 +52,35 @@ class MetaDriveSimulator(DrivingSimulator):
         else:
             self.film_size = None
 
+        # Set up the simulator
+        decision_repeat = math.ceil(self.timestep / 0.02)
+        physics_world_step_size = self.timestep / decision_repeat
+
+        # placeholder for the ego vehicle configuration
+        vehicle_config = {}
+        vehicle_config["spawn_position_heading"] = [
+            (0.0, 0.0),
+            0.0,
+        ]
+        vehicle_config["lane_line_detector"] = dict(
+            num_lasers=10,
+            distance=20,
+        )
+
+        # Initialize the simulator with ego vehicle
+        self.client = utils.DriveEnv(
+            dict(
+                decision_repeat=decision_repeat,
+                physics_world_step_size=physics_world_step_size,
+                use_render=self.render3D,
+                vehicle_config=vehicle_config,
+                use_mesh_terrain=self.render3D,
+                log_level=logging.CRITICAL,
+            )
+        )
+        self.client.config["sumo_map"] = self.sumo_map
+        self.client.reset()
+
     def createSimulation(self, scene, *, timestep, **kwargs):
         self.scenario_number += 1
         return MetaDriveSimulation(
@@ -65,6 +94,7 @@ class MetaDriveSimulator(DrivingSimulator):
             scenic_offset=self.scenic_offset,
             sumo_map_boundary=self.sumo_map_boundary,
             film_size=self.film_size,
+            client=self.client,
             **kwargs,
         )
 
@@ -82,6 +112,7 @@ class MetaDriveSimulation(DrivingSimulation):
         scenic_offset,
         sumo_map_boundary,
         film_size,
+        client,
         **kwargs,
     ):
         if len(scene.objects) == 0:
@@ -104,6 +135,7 @@ class MetaDriveSimulation(DrivingSimulation):
         self.scenic_offset = scenic_offset
         self.sumo_map_boundary = sumo_map_boundary
         self.film_size = film_size
+        self.client = client
         self.observation = []
         self.actions = dict()
         self.info = {}
@@ -111,7 +143,7 @@ class MetaDriveSimulation(DrivingSimulation):
         self.previous_gap_platoon2 = None
         super().__init__(scene, timestep=timestep, **kwargs)
 
-    def createObjectInSimulator(self, obj):
+    def createObjectInSimulator(self, obj): # move up to metadrive simulator class and just create once
         """
         Create an object in the MetaDrive simulator.
 
@@ -136,29 +168,13 @@ class MetaDriveSimulation(DrivingSimulation):
                 distance=20,
             )
 
-        if not self.defined_ego:
-            decision_repeat = math.ceil(self.timestep / 0.02)
-            physics_world_step_size = self.timestep / decision_repeat
-
-            # Initialize the simulator with ego vehicle
-            self.client = utils.DriveEnv(
-                dict(
-                    decision_repeat=decision_repeat,
-                    physics_world_step_size=physics_world_step_size,
-                    use_render=self.render3D,
-                    vehicle_config=vehicle_config,
-                    use_mesh_terrain=self.render3D,
-                    log_level=logging.CRITICAL,
-                )
-            )
-            self.client.config["sumo_map"] = self.sumo_map
-            self.client.reset()
-
-            # Assign the MetaDrive actor to the ego
-            metadrive_objects = self.client.engine.get_objects()
-            obj.metaDriveActor = list(metadrive_objects.values())[0]
-            self.defined_ego = True
-            return
+        # if not self.defined_ego:
+        #     print(obj)
+        #     # Assign the MetaDrive actor to the ego
+        #     metadrive_objects = self.client.engine.get_objects()
+        #     obj.metaDriveActor = list(metadrive_objects.values())[0]
+        #     self.defined_ego = True
+        #     return
 
         # For additional cars
         if obj.isVehicle:
@@ -213,7 +229,7 @@ class MetaDriveSimulation(DrivingSimulation):
 
         # Special handling for the ego vehicle
         ego_obj = self.scene.objects[0]
-        self.client.step(ego_obj._collect_action())
+        self.client.step([self.actions[0], self.actions[1]])
         ego_obj._reset_control()
 
         # Render the scene in 2D if needed
@@ -235,6 +251,12 @@ class MetaDriveSimulation(DrivingSimulation):
         return o
 
     def get_info(self):
+        positions = {}
+        for obj in self.scene.objects:
+            if getattr(obj, "isVehicle", False):
+                props = self.getProperties(obj, ["position"])
+                positions[obj.name if hasattr(obj, "name") else id(obj)] = props["position"]
+        self.info["vehiclePositions"] = positions
         return self.info
 
     def clip(self, a, low, high):
@@ -249,7 +271,7 @@ class MetaDriveSimulation(DrivingSimulation):
             object_ids = list(self.client.engine._spawned_objects.keys())
             if object_ids:
                 self.client.engine.agent_manager.clear_objects(object_ids)
-            self.client.close()
+            # self.client.close()
 
         super().destroy()
 
