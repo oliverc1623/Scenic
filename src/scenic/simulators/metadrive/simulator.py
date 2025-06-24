@@ -79,10 +79,10 @@ class MetaDriveSimulator(DrivingSimulator):
             )
         )
         self.client.config["sumo_map"] = self.sumo_map
-        self.client.reset()
 
     def createSimulation(self, scene, *, timestep, **kwargs):
         self.scenario_number += 1
+        self.client.reset()
         return MetaDriveSimulation(
             scene,
             render=self.render,
@@ -257,6 +257,8 @@ class MetaDriveSimulation(DrivingSimulation):
                 props = self.getProperties(obj, ["position"])
                 positions[obj.name if hasattr(obj, "name") else id(obj)] = props["position"]
         self.info["vehiclePositions"] = positions
+        self.info["client_objs"] = list(self.client.engine.get_objects().keys())
+        self.info["client_objs_vals"] = list(self.client.engine.get_policies())
         return self.info
 
     def clip(self, a, low, high):
