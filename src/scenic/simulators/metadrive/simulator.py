@@ -57,12 +57,12 @@ class MetaDriveSimulator(DrivingSimulator):
         physics_world_step_size = self.timestep / decision_repeat
 
         # placeholder for the ego vehicle configuration
-        vehicle_config = {}
-        vehicle_config["spawn_position_heading"] = [
+        self.vehicle_config = {}
+        self.vehicle_config["spawn_position_heading"] = [
             (0.0, 0.0),
             0.0,
         ]
-        vehicle_config["lane_line_detector"] = dict(
+        self.vehicle_config["lane_line_detector"] = dict(
             num_lasers=10,
             distance=20,
         )
@@ -73,7 +73,7 @@ class MetaDriveSimulator(DrivingSimulator):
                 decision_repeat=decision_repeat,
                 physics_world_step_size=physics_world_step_size,
                 use_render=self.render3D,
-                vehicle_config=vehicle_config,
+                vehicle_config=self.vehicle_config,
                 use_mesh_terrain=self.render3D,
                 log_level=logging.CRITICAL,
             )
@@ -82,7 +82,24 @@ class MetaDriveSimulator(DrivingSimulator):
 
     def createSimulation(self, scene, *, timestep, **kwargs):
         self.scenario_number += 1
+        obj = scene.objects[0]
+        converted_position = utils.scenicToMetaDrivePosition(
+            obj.position, self.scenic_offset
+        )
+        converted_heading = utils.scenicToMetaDriveHeading(obj.heading)
+
+        self.client.config["vehicle_config"]["spawn_position_heading"] = [
+            converted_position,
+            converted_heading,
+        ]
+        self.client.config["vehicle_config"]["spawn_velocity"] = [obj.velocity.x, obj.velocity.y]
+        self.client.config["vehicle_config"]["spawn_velocity"] = [obj.velocity.x, obj.velocity.y]
+        self.client.config["vehicle_config"]["lane_line_detector"] = dict(
+            num_lasers=10,
+            distance=20,
+        )
         self.client.reset()
+
         return MetaDriveSimulation(
             scene,
             render=self.render,
@@ -128,7 +145,6 @@ class MetaDriveSimulation(DrivingSimulation):
         self.render3D = render3D
         self.scenario_number = scenario_number
         self.defined_ego = False
-        self.client = None
         self.timestep = timestep
         self.sumo_map = sumo_map
         self.real_time = real_time
@@ -168,13 +184,12 @@ class MetaDriveSimulation(DrivingSimulation):
                 distance=20,
             )
 
-        # if not self.defined_ego:
-        #     print(obj)
-        #     # Assign the MetaDrive actor to the ego
-        #     metadrive_objects = self.client.engine.get_objects()
-        #     obj.metaDriveActor = list(metadrive_objects.values())[0]
-        #     self.defined_ego = True
-        #     return
+        if not self.defined_ego:
+            # Assign the MetaDrive actor to the ego
+            metadrive_objects = self.client.engine.get_objects()
+            obj.metaDriveActor = list(metadrive_objects.values())[0]
+            self.defined_ego = True
+            return
 
         # For additional cars
         if obj.isVehicle:
@@ -249,13 +264,14 @@ class MetaDriveSimulation(DrivingSimulation):
         ego = self.scene.objects[0]
         o = self.client.get_single_observation().observe(ego.metaDriveActor)
         return o
+    
+    def render(self):
+        return self.client.render()
 
     def get_info(self):
         positions = {}
         for obj in self.scene.objects:
-            if getattr(obj, "isVehicle", False):
-                props = self.getProperties(obj, ["position"])
-                positions[obj.name if hasattr(obj, "name") else id(obj)] = props["position"]
+            positions[obj] = obj.position
         self.info["vehiclePositions"] = positions
         self.info["client_objs"] = list(self.client.engine.get_objects().keys())
         self.info["client_objs_vals"] = list(self.client.engine.get_policies())
