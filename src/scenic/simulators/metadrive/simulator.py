@@ -47,10 +47,7 @@ class MetaDriveSimulator(DrivingSimulator):
         self.sumo_map = sumo_map
         self.real_time = real_time
         self.scenic_offset, self.sumo_map_boundary = utils.getMapParameters(self.sumo_map)
-        if self.render and not self.render3D:
-            self.film_size = utils.calculateFilmSize(self.sumo_map_boundary, scaling=5)
-        else:
-            self.film_size = None
+        self.film_size = utils.calculateFilmSize(self.sumo_map_boundary, scaling=5)
 
         # Set up the simulator
         decision_repeat = math.ceil(self.timestep / 0.02)
@@ -171,19 +168,6 @@ class MetaDriveSimulation(DrivingSimulation):
         )
         converted_heading = utils.scenicToMetaDriveHeading(obj.heading)
 
-        vehicle_config = {}
-        if obj.isVehicle:
-            vehicle_config["spawn_position_heading"] = [
-                converted_position,
-                converted_heading,
-            ]
-            vehicle_config["spawn_velocity"] = [obj.velocity.x, obj.velocity.y]
-            vehicle_config["spawn_velocity"] = [obj.velocity.x, obj.velocity.y]
-            vehicle_config["lane_line_detector"] = dict(
-                num_lasers=10,
-                distance=20,
-            )
-
         if not self.defined_ego:
             # Assign the MetaDrive actor to the ego
             metadrive_objects = self.client.engine.get_objects()
@@ -250,7 +234,7 @@ class MetaDriveSimulation(DrivingSimulation):
         # Render the scene in 2D if needed
         if self.render and not self.render3D:
             self.client.render(
-                mode="topdown", semantic_map=True, film_size=self.film_size, scaling=5
+                mode="topdown", semantic_map=True, film_size=self.film_size, scaling=5, screen_record=True
             )
 
         # If real-time synchronization is enabled, sleep to maintain real-time pace
@@ -269,10 +253,7 @@ class MetaDriveSimulation(DrivingSimulation):
         return self.client.render()
 
     def get_info(self):
-        positions = {}
-        for obj in self.scene.objects:
-            positions[obj] = obj.position
-        self.info["vehiclePositions"] = positions
+        self.info["ego_pos"] = self.scene.objects[0].position
         self.info["client_objs"] = list(self.client.engine.get_objects().keys())
         self.info["client_objs_vals"] = list(self.client.engine.get_policies())
         return self.info
@@ -289,8 +270,6 @@ class MetaDriveSimulation(DrivingSimulation):
             object_ids = list(self.client.engine._spawned_objects.keys())
             if object_ids:
                 self.client.engine.agent_manager.clear_objects(object_ids)
-            # self.client.close()
-
         super().destroy()
 
     def getProperties(self, obj, properties):
