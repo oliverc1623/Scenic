@@ -95,7 +95,13 @@ class ScenicGymEnv(gym.Env):
         """
         # FIXME for one project only...also a bit hacky...
         # self.env.render()
-        pass
+        img = self.simulator.client.render(
+            mode="topdown", 
+            semantic_map=True, 
+            film_size=self.simulator.film_size, 
+            scaling=5,
+        )
+        return img
 
     def close(self):
         self.simulator.destroy()
