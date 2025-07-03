@@ -95,7 +95,6 @@ class MetaDriveSimulator(DrivingSimulator):
             num_lasers=10,
             distance=20,
         )
-        self.client.reset()
 
         return MetaDriveSimulation(
             scene,
@@ -149,9 +148,11 @@ class MetaDriveSimulation(DrivingSimulation):
         self.sumo_map_boundary = sumo_map_boundary
         self.film_size = film_size
         self.client = client
-        self.observation = []
+        o, i = self.client.reset()
+        self.observation = o
+        self.reward = 0.0
         self.actions = dict()
-        self.info = {}
+        self.info = i
         self.previous_gap_platoon1 = None
         self.previous_gap_platoon2 = None
         super().__init__(scene, timestep=timestep, **kwargs)
@@ -228,7 +229,10 @@ class MetaDriveSimulation(DrivingSimulation):
 
         # Special handling for the ego vehicle
         ego_obj = self.scene.objects[0]
-        self.client.step([self.actions[0], self.actions[1]])
+        o, _, _, _, i = self.client.step([self.actions[0], self.actions[1]])
+        self.observation = o
+        self.info = i
+        self.reward = ego_obj.reward
         ego_obj._reset_control()
 
         # Render the scene in 2D if needed
@@ -245,15 +249,14 @@ class MetaDriveSimulation(DrivingSimulation):
                 time.sleep(self.timestep - elapsed_time)
 
     def get_obs(self):
-        ego = self.scene.objects[0]
-        o = self.client.get_single_observation().observe(ego.metaDriveActor)
-        return o
+        return self.observation
     
     def render(self):
         return self.client.render()
 
     def get_info(self):
         self.info["ego_pos"] = self.scene.objects[0].position
+        self.info["ego_speed"] = self.scene.objects[0].speed
         self.info["client_objs"] = list(self.client.engine.get_objects().keys())
         self.info["client_objs_vals"] = list(self.client.engine.get_policies())
         return self.info
@@ -262,8 +265,7 @@ class MetaDriveSimulation(DrivingSimulation):
         return min(max(a, low), high)
 
     def get_reward(self):
-        ego = self.scene.objects[0]
-        return ego.reward
+        return self.reward
 
     def destroy(self):
         if self.client and self.client.engine:

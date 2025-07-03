@@ -90,8 +90,10 @@ class MetaDriveActor(DrivingObject):
     metaDriveActor: None
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.max_speed_mps = 22.3
         self.reward = 0
-        self.last_position = None
+        self.last_position = self.position
+        self.last_speed = 0
 
 class Vehicle(Vehicle, Steers, MetaDriveActor):
     def __init__(self, *args, **kwargs):
