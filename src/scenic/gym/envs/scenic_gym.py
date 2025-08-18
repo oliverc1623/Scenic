@@ -62,7 +62,7 @@ class ScenicGymEnv(gym.Env):
                         if done():
                             self.feedback_result = simulation.result
                             self.simulation_results.append(simulation.result)
-                            self.feedback_result = None
+                            self.feedback_result = reward
                             simulation.destroy()
                             actions = yield observation, reward, done(), truncated(), info
                             break # a little unclean right here

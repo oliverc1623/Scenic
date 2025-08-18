@@ -148,13 +148,9 @@ class MetaDriveSimulation(DrivingSimulation):
         self.sumo_map_boundary = sumo_map_boundary
         self.film_size = film_size
         self.client = client
-        o, i = self.client.reset()
-        self.observation = o
+        self.observation, self.info = self.client.reset()
         self.reward = 0.0
         self.actions = dict()
-        self.info = i
-        self.previous_gap_platoon1 = None
-        self.previous_gap_platoon2 = None
         super().__init__(scene, timestep=timestep, **kwargs)
 
     def createObjectInSimulator(self, obj): # move up to metadrive simulator class and just create once
@@ -229,9 +225,7 @@ class MetaDriveSimulation(DrivingSimulation):
 
         # Special handling for the ego vehicle
         ego_obj = self.scene.objects[0]
-        o, _, _, _, i = self.client.step([self.actions[0], self.actions[1]])
-        self.observation = o
-        self.info = i
+        self.observation, _, _, _, self.info = self.client.step([self.actions[0], self.actions[1]])
         self.reward = ego_obj.reward
         ego_obj._reset_control()
 
