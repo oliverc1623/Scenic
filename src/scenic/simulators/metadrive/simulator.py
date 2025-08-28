@@ -91,10 +91,8 @@ class MetaDriveSimulator(DrivingSimulator):
         ]
         self.client.config["vehicle_config"]["spawn_velocity"] = [obj.velocity.x, obj.velocity.y]
         self.client.config["vehicle_config"]["spawn_velocity"] = [obj.velocity.x, obj.velocity.y]
-        self.client.config["vehicle_config"]["lane_line_detector"] = dict(
-            num_lasers=10,
-            distance=20,
-        )
+        self.client.config["vehicle_config"]["lane_line_detector"] = dict(num_lasers=12,distance=20,)
+        self.client.config["vehicle_config"]["side_detector"] = dict(num_lasers=12,distance=50,)
 
         return MetaDriveSimulation(
             scene,
