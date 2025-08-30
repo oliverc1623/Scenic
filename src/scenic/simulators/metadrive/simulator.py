@@ -59,11 +59,11 @@ class MetaDriveSimulator(DrivingSimulator):
             (0.0, 0.0),
             0.0,
         ]
-        self.vehicle_config["lane_line_detector"] = dict(
-            num_lasers=10,
-            distance=20,
+        self.vehicle_config["lane_line_detector"] = dict(num_lasers=50, distance=20)
+        self.vehicle_config["side_detector"] = dict(num_lasers=50, distance=50)
+        self.vehicle_config["lidar"] = dict(
+            num_lasers=240, distance=50, num_others=0, gaussian_noise=0.0, dropout_prob=0.0, add_others_navi=False
         )
-
         # Initialize the simulator with ego vehicle
         self.client = utils.DriveEnv(
             dict(
@@ -91,8 +91,8 @@ class MetaDriveSimulator(DrivingSimulator):
         ]
         self.client.config["vehicle_config"]["spawn_velocity"] = [obj.velocity.x, obj.velocity.y]
         self.client.config["vehicle_config"]["spawn_velocity"] = [obj.velocity.x, obj.velocity.y]
-        self.client.config["vehicle_config"]["lane_line_detector"] = dict(num_lasers=12,distance=20,)
-        self.client.config["vehicle_config"]["side_detector"] = dict(num_lasers=12,distance=50,)
+        self.client.config["vehicle_config"]["lane_line_detector"] = dict(num_lasers=50,distance=20,)
+        self.client.config["vehicle_config"]["side_detector"] = dict(num_lasers=50,distance=50,)
 
         return MetaDriveSimulation(
             scene,
