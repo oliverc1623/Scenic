@@ -52,22 +52,26 @@ class ScenicGymEnv(gym.Env):
                     simulation.actions = actions # TODO add action dict to simulation interfaces
 
                     while not done():
+                        simulation.advance()
+                        steps_taken += 1
                         observation = simulation.get_obs()
                         info = simulation.get_info()
                         reward = simulation.get_reward()
+                        
+                        # Check termination status after getting reward
+                        is_done = done()
+                        is_truncated = truncated()
 
-                        simulation.advance()
-                        steps_taken += 1
-
-                        if done():
+                        if is_done:
                             self.feedback_result = simulation.result
+                            final_reward = list(self.feedback_result.records.values())[0]
                             self.simulation_results.append(simulation.result)
-                            self.feedback_result = reward
                             simulation.destroy()
-                            actions = yield observation, reward, done(), truncated(), info
-                            break # a little unclean right here
+                            # Return the termination reward with the final meaningful observation
+                            actions = yield observation, final_reward, is_done, is_truncated, info
+                            break
 
-                        actions = yield observation, reward, done(), truncated(), info
+                        actions = yield observation, reward, is_done, is_truncated, info
                         simulation.actions = actions # TODO add action dict to simulation interfaces
 
             except ResetException:

@@ -94,6 +94,7 @@ class MetaDriveActor(DrivingObject):
         self.reward = 0
         self.last_position = self.position
         self.last_speed = 0
+        self.prev_ego_dist_to_pack = 0
 
 class Vehicle(Vehicle, Steers, MetaDriveActor):
     def __init__(self, *args, **kwargs):
