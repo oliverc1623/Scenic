@@ -68,7 +68,8 @@ class ScenicGymEnv(gym.Env):
                         if is_done:
                             self.feedback_result = simulation.result
                             final_reward = list(self.feedback_result.records.values())[0]
-                            self.simulation_results.append(simulation.result)
+                            if final_reward == 10:
+                                self.simulation_results.append(simulation.result)
                             simulation.destroy()
                             # Return the termination reward with the final meaningful observation
                             actions = yield observation, final_reward, is_done, is_truncated, info
@@ -112,11 +113,11 @@ class ScenicGymEnv(gym.Env):
 
     def close(self, write_results: bool = False):
         if write_results:
-            results_dir = "simulation_results"
+            results_dir = "results/sac/"
             os.makedirs(results_dir, exist_ok=True)
             for idx, result in enumerate(self.simulation_results):
                 traj = np.array(result.trajectory)  # shape: (timesteps, objects, 3)
-                filename = os.path.join(results_dir, f"episode_{idx}.csv")
+                filename = os.path.join(results_dir, f"episode_cex_{idx+1:02d}.csv")
                 with open(filename, "w", newline="") as csvfile:
                     writer = csv.writer(csvfile)
                     writer.writerow(["timestep", "object", "x", "y", "z"])
