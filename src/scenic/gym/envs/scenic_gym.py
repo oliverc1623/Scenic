@@ -3,6 +3,9 @@ from scenic.core.scenarios import Scenario
 import gymnasium as gym
 from gymnasium import spaces
 from typing import Callable
+import numpy as np
+import csv
+import os
 
 #TODO make ResetException
 class ResetException(Exception):
@@ -107,5 +110,19 @@ class ScenicGymEnv(gym.Env):
             scaling=5,
         )
 
-    def close(self):
+    def close(self, write_results: bool = False):
+        if write_results:
+            results_dir = "simulation_results"
+            os.makedirs(results_dir, exist_ok=True)
+            for idx, result in enumerate(self.simulation_results):
+                traj = np.array(result.trajectory)  # shape: (timesteps, objects, 3)
+                filename = os.path.join(results_dir, f"episode_{idx}.csv")
+                with open(filename, "w", newline="") as csvfile:
+                    writer = csv.writer(csvfile)
+                    writer.writerow(["timestep", "object", "x", "y", "z"])
+                    timesteps, num_objects, _ = traj.shape
+                    for obj in range(num_objects):
+                        for t in range(timesteps):
+                            x, y, z = traj[t, obj]
+                            writer.writerow([t, obj, x, y, z])
         self.simulator.client.close()
