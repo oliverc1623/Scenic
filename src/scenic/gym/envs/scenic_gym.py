@@ -6,6 +6,7 @@ from typing import Callable
 import numpy as np
 import csv
 import os
+from rarlet import falsifier
 
 #TODO make ResetException
 class ResetException(Exception):
@@ -35,6 +36,7 @@ class ScenicGymEnv(gym.Env):
         self.simulator = simulator
         self.scenario = scenario
         self.simulation_results = []
+        self.distance_monitor = falsifier.Distance(route="results/sac/") # TODO make route an argument
 
         self.feedback_result = None
         self.loop = None
@@ -70,6 +72,7 @@ class ScenicGymEnv(gym.Env):
                             final_reward = list(self.feedback_result.records.values())[0]
                             if final_reward == 10:
                                 self.simulation_results.append(simulation.result)
+                                self.distance_monitor.specification(simulation)
                             simulation.destroy()
                             # Return the termination reward with the final meaningful observation
                             actions = yield observation, final_reward, is_done, is_truncated, info
@@ -112,18 +115,4 @@ class ScenicGymEnv(gym.Env):
         )
 
     def close(self, write_results: bool = False):
-        if write_results:
-            results_dir = "results/sac/"
-            os.makedirs(results_dir, exist_ok=True)
-            for idx, result in enumerate(self.simulation_results):
-                traj = np.array(result.trajectory)  # shape: (timesteps, objects, 3)
-                filename = os.path.join(results_dir, f"episode_cex_{idx+1:02d}.csv")
-                with open(filename, "w", newline="") as csvfile:
-                    writer = csv.writer(csvfile)
-                    writer.writerow(["timestep", "object", "x", "y", "z"])
-                    timesteps, num_objects, _ = traj.shape
-                    for obj in range(num_objects):
-                        for t in range(timesteps):
-                            x, y, z = traj[t, obj]
-                            writer.writerow([t, obj, x, y, z])
         self.simulator.client.close()
