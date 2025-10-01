@@ -1,3 +1,4 @@
+from pathlib import Path
 from scenic.core.simulators import Simulator, Simulation
 from scenic.core.scenarios import Scenario
 import gymnasium as gym
@@ -22,6 +23,7 @@ class ScenicGymEnv(gym.Env):
     def __init__(self, 
                  scenario : Scenario,
                  simulator : Simulator,
+                 seed: int = 1,
                  render_mode=None, 
                  max_steps = 1000,
                  observation_space : spaces.Dict = spaces.Dict(),
@@ -36,7 +38,8 @@ class ScenicGymEnv(gym.Env):
         self.simulator = simulator
         self.scenario = scenario
         self.simulation_results = []
-        self.distance_monitor = falsifier.Distance(route="results/sac/") # TODO make route an argument
+        self.distance_monitor = falsifier.Distance(route=f"results/sac/seed_{seed}") # TODO make route an argument
+        self.mapped_actions = []
 
         self.feedback_result = None
         self.loop = None
@@ -48,6 +51,7 @@ class ScenicGymEnv(gym.Env):
                 scene, _ = self.scenario.generate(feedback=self.feedback_result)
                 with self.simulator.simulateStepped(scene, maxSteps=self.max_steps) as simulation:
                     steps_taken = 0
+                    self.mapped_actions = []
                     # this first block before the while loop is for the first reset call
                     done = lambda: not (simulation.result is None)
                     truncated = lambda: (steps_taken >= self.max_steps) # TODO handle cases where it is done right on maxsteps
@@ -57,6 +61,11 @@ class ScenicGymEnv(gym.Env):
                     simulation.actions = actions # TODO add action dict to simulation interfaces
 
                     while not done():
+                        steering = actions[0]
+                        acceleration = max(0, actions[1])
+                        braking = -min(0, actions[1])
+                        self.mapped_actions.append([steps_taken, 0, steering, acceleration, braking])
+
                         simulation.advance()
                         steps_taken += 1
                         observation = simulation.get_obs()
@@ -69,10 +78,18 @@ class ScenicGymEnv(gym.Env):
 
                         if is_done:
                             self.feedback_result = simulation.result
-                            final_reward = list(self.feedback_result.records.values())[0]
+                            final_reward = list(self.feedback_result.records.values())[-1]
                             if final_reward == 10:
                                 self.simulation_results.append(simulation.result)
-                                self.distance_monitor.specification(simulation)
+                                self.distance_monitor.specification(simulation, rl=True)
+
+                                actions_csv_path = Path(f"results/sac/seed_11/actions_cex_{(self.distance_monitor.counterex-1):02d}.csv")
+                                actions_csv_path.parent.mkdir(parents=True, exist_ok=True)
+                                with Path.open(actions_csv_path, mode="w", newline="") as csv_file:
+                                    csv_writer = csv.writer(csv_file)
+                                    csv_writer.writerow(["timestep", "object", "attacker_steering", "attacker_acceleration", "attacker_braking"])
+                                    csv_writer.writerows(self.mapped_actions)
+
                             simulation.destroy()
                             # Return the termination reward with the final meaningful observation
                             actions = yield observation, final_reward, is_done, is_truncated, info
