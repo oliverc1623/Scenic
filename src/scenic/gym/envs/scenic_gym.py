@@ -38,7 +38,8 @@ class ScenicGymEnv(gym.Env):
         self.simulator = simulator
         self.scenario = scenario
         self.simulation_results = []
-        self.distance_monitor = falsifier.Distance(route=f"results/sac/seed_{seed}") # TODO make route an argument
+        self.seed = seed
+        self.distance_monitor = falsifier.Distance(route=f"results/sac/seed_{self.seed}") # TODO make route an argument
         self.mapped_actions = []
 
         self.feedback_result = None
@@ -83,7 +84,7 @@ class ScenicGymEnv(gym.Env):
                                 self.simulation_results.append(simulation.result)
                                 self.distance_monitor.specification(simulation, rl=True)
 
-                                actions_csv_path = Path(f"results/sac/seed_11/actions_cex_{(self.distance_monitor.counterex-1):02d}.csv")
+                                actions_csv_path = Path(f"results/sac/seed_{self.seed}/actions_cex_{(self.distance_monitor.counterex-1):02d}.csv")
                                 actions_csv_path.parent.mkdir(parents=True, exist_ok=True)
                                 with Path.open(actions_csv_path, mode="w", newline="") as csv_file:
                                     csv_writer = csv.writer(csv_file)
