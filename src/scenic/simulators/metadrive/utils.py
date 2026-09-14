@@ -11,7 +11,7 @@ import xml.etree.ElementTree as ET
 
 from metadrive.envs import BaseEnv
 from metadrive.manager.sumo_map_manager import SumoMapManager
-from metadrive.obs.observation_base import DummyObservation
+from metadrive.obs.state_obs import LidarStateObservation
 
 from scenic.core.vectors import Vector
 
@@ -70,14 +70,19 @@ def extractXODROffset(xodr_map_path):
     return float(offset.get("x", "0")), float(offset.get("y", "0"))
 
 
-def getMapParameters(sumo_map_path, xodr_map_path):
-    """Retrieve the map parameters."""
+def getMapParameters(sumo_map_path, xodr_map_path=None):
+    """Retrieve the map parameters.
+
+    xodr_map_path is optional: without it the OpenDRIVE header offset is taken
+    to be zero, which matches the pre-3.1.1 behaviour (and is exact for maps
+    whose header carries no <offset>, such as the CARLA towns).
+    """
     net_offset, sumo_map_boundary = extractNetOffsetAndBoundary(sumo_map_path)
     xmin, ymin, xmax, ymax = sumo_map_boundary
     center_x = (xmin + xmax) / 2
     center_y = (ymin + ymax) / 2
 
-    xodr_offset = extractXODROffset(xodr_map_path)
+    xodr_offset = extractXODROffset(xodr_map_path) if xodr_map_path else (0.0, 0.0)
     combined_offset_x = net_offset[0] + xodr_offset[0]
     combined_offset_y = net_offset[1] + xodr_offset[1]
 
@@ -132,8 +137,12 @@ class DriveEnv(BaseEnv):
         return False, {}
 
     def get_single_observation(self):
-        """Dummy observation function."""
-        return DummyObservation()
+        """Ego observation: MetaDrive lidar + side/lane detectors + vehicle state.
+
+        With the detector config set in MetaDriveSimulator this is a 346-dim
+        vector, which is what the RARLET policies were trained against.
+        """
+        return LidarStateObservation(self.config)
 
     def setup_engine(self):
         """Setup the engine for MetaDrive."""

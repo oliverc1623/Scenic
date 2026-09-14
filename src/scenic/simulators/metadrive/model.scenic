@@ -118,6 +118,17 @@ class MetaDriveActor(DrivingObject):
     """
     metaDriveActor: None
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Per-step reward and bookkeeping written by scenario monitors
+        # (see rarlet/scenarios/*.scenic: Rewarder / Reaches) and read back by
+        # MetaDriveSimulation.step() as the RL reward.
+        self.max_speed_mps = 22.3
+        self.reward = 0
+        self.last_position = self.position
+        self.last_speed = 0
+        self.prev_ego_dist_to_pack = 0
+
     def setPosition(self, pos, elevation):
         position = scenicToMetaDrivePosition(pos, simulation().scenic_offset)
         self.metaDriveActor.set_position(position)
@@ -132,6 +143,11 @@ class Vehicle(Vehicle, Steers, MetaDriveActor):
         self._control = {"steer": 0.0, "throttle": 0.0, "brake": 0.0}
         self._reverse = False
         self._handbrake = False
+
+    def _reset_control(self):
+        # Controls are applied for exactly one step; a behaviour that stops
+        # issuing an action coasts rather than holding its last command.
+        self._control = {"steer": 0.0, "throttle": 0.0, "brake": 0.0}
 
     def setThrottle(self, throttle):
         self._control["throttle"] = throttle

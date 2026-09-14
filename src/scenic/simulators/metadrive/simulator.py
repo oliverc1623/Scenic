@@ -9,14 +9,18 @@ except ModuleNotFoundError as e:
 
 from datetime import datetime
 import logging
+import math
 import os
 import sys
 import time
+
+import numpy as np
 
 from metadrive.component.sensors.rgb_camera import RGBCamera
 from metadrive.component.sensors.semantic_camera import SemanticCamera
 from metadrive.component.traffic_participants.pedestrian import Pedestrian
 from metadrive.component.vehicle.vehicle_type import DefaultVehicle
+from metadrive.engine.engine_utils import close_engine, engine_initialized
 
 from scenic.core.simulators import InvalidScenarioError, SimulationCreationError
 from scenic.domains.driving.actions import *
@@ -35,7 +39,7 @@ class MetaDriveSimulator(DrivingSimulator):
     def __init__(
         self,
         sumo_map,
-        xodr_map,
+        xodr_map=None,
         timestep=0.1,
         render=True,
         render3D=False,
@@ -74,8 +78,67 @@ class MetaDriveSimulator(DrivingSimulator):
         else:
             self.film_size = None
 
+        # One MetaDrive client for the lifetime of the simulator, created on
+        # first use (see _ensure_client). Upstream builds a fresh client, and
+        # re-loads the map, for every simulation; sharing it makes episode
+        # resets cheap, which matters for RL where thousands of short episodes
+        # run against the same map.
+        decision_repeat = math.ceil(self.timestep / 0.02)
+        physics_world_step_size = self.timestep / decision_repeat
+
+        # Ego sensor suite. Together these define the observation vector
+        # (LidarStateObservation in utils.DriveEnv): 240 lidar + 50 side + 50
+        # lane-line rays plus vehicle state = 346 values.
+        self.vehicle_config = {
+            "spawn_position_heading": [(0.0, 0.0), 0.0],
+            "lane_line_detector": dict(num_lasers=50, distance=20),
+            "side_detector": dict(num_lasers=50, distance=50),
+            "lidar": dict(
+                num_lasers=240,
+                distance=50,
+                num_others=0,
+                gaussian_noise=0.0,
+                dropout_prob=0.0,
+                add_others_navi=False,
+            ),
+        }
+        self._client_config = dict(
+            decision_repeat=decision_repeat,
+            physics_world_step_size=physics_world_step_size,
+            use_render=self.render3D,
+            vehicle_config=self.vehicle_config,
+            use_mesh_terrain=False,
+            height_scale=0.0001,
+            log_level=logging.CRITICAL,
+        )
+        self.client = None
+
+    def _ensure_client(self):
+        if self.client is None:
+            # MetaDrive's engine is a process-wide singleton. If an earlier
+            # simulator in this process was never destroy()ed (upstream's tests
+            # do this; the module-level simulator in model.scenic can too), its
+            # engine is still up and constructing another DriveEnv asserts.
+            # Only one can exist anyway, so take it over.
+            if engine_initialized():
+                close_engine()
+            self.client = utils.DriveEnv(dict(self._client_config))
+            self.client.config["sumo_map"] = self.sumo_map
+        return self.client
+
     def createSimulation(self, scene, *, timestep, **kwargs):
         self.scenario_number += 1
+        client = self._ensure_client()
+
+        # The shared client spawns the ego itself on reset(), so its spawn pose
+        # and velocity have to be pushed into the client config per scene.
+        ego = scene.objects[0]
+        ego_position = utils.scenicToMetaDrivePosition(ego.position, self.scenic_offset)
+        ego_heading = utils.scenicToMetaDriveHeading(ego.heading)
+        vehicle_config = client.config["vehicle_config"]
+        vehicle_config["spawn_position_heading"] = [ego_position, ego_heading]
+        vehicle_config["spawn_velocity"] = [ego.velocity.x, ego.velocity.y]
+
         return MetaDriveSimulation(
             scene,
             render=self.render,
@@ -90,8 +153,16 @@ class MetaDriveSimulator(DrivingSimulator):
             scenic_offset=self.scenic_offset,
             sumo_map_boundary=self.sumo_map_boundary,
             film_size=self.film_size,
+            client=client,
             **kwargs,
         )
+
+    def destroy(self):
+        # Simulations do not close the shared client; the simulator owns it.
+        if self.client is not None:
+            self.client.close()
+            self.client = None
+        super().destroy()
 
 
 class MetaDriveSimulation(DrivingSimulation):
@@ -110,6 +181,7 @@ class MetaDriveSimulation(DrivingSimulation):
         scenic_offset,
         sumo_map_boundary,
         film_size,
+        client,
         **kwargs,
     ):
         if len(scene.objects) == 0:
@@ -120,12 +192,21 @@ class MetaDriveSimulation(DrivingSimulation):
             raise InvalidScenarioError(
                 "The first object must be a car to serve as the ego vehicle in Metadrive."
             )
+        # Checked here, before Simulation.__init__ activates Scenic's global
+        # simulation state: an error raised from setup() would leave that state
+        # dirty (core only cleans up on rejections), breaking the next simulation.
+        if any(obj.sensors for obj in scene.objects):
+            raise SimulationCreationError(
+                "MetaDrive camera sensors are not supported here: this interface "
+                "shares one MetaDrive client across simulations and cannot "
+                "reconfigure its sensors per scene."
+            )
 
         self.render = render
         self.render3D = render3D
         self.scenario_number = scenario_number
         self.defined_ego = False
-        self.client = None
+        self.client = client
         self.timestep = timestep
         self.sumo_map = sumo_map
         self.real_time = real_time
@@ -135,6 +216,14 @@ class MetaDriveSimulation(DrivingSimulation):
         self.scenic_offset = scenic_offset
         self.sumo_map_boundary = sumo_map_boundary
         self.film_size = film_size
+
+        # Reset the shared client for this scene (spawns the ego at the pose set
+        # in createSimulation) and capture the first observation.
+        self.observation, self.info = self.client.reset()
+        self.reward = 0.0
+        # Set by the gym loop (scenic.gym) each step; None when Scenic is driving
+        # the ego through a behaviour instead.
+        self.actions = None
         super().__init__(scene, timestep=timestep, **kwargs)
 
     # --- sensor helpers ---
@@ -206,26 +295,7 @@ class MetaDriveSimulation(DrivingSimulation):
             vehicle_config["spawn_velocity"] = [obj.velocity.x, obj.velocity.y]
 
         if not self.defined_ego:
-            decision_repeat = math.ceil(self.timestep / 0.02)
-            physics_world_step_size = self.timestep / decision_repeat
-
-            # Initialize the simulator with ego vehicle
-            self.client = utils.DriveEnv(
-                dict(
-                    decision_repeat=decision_repeat,
-                    physics_world_step_size=physics_world_step_size,
-                    use_render=self.render3D,
-                    vehicle_config=vehicle_config,
-                    use_mesh_terrain=False,
-                    height_scale=0.0001,
-                    log_level=logging.CRITICAL,
-                    image_observation=self.using_sensors,
-                    sensors=self.drive_env_config,
-                )
-            )
-            self.client.config["sumo_map"] = self.sumo_map
-            self.client.reset()
-
+            # The ego was spawned by client.reset() in __init__; just bind it.
             # Assign the MetaDrive actor to the ego
             metadrive_objects = self.client.engine.get_objects()
             obj.metaDriveActor = list(metadrive_objects.values())[0]
@@ -237,6 +307,11 @@ class MetaDriveSimulation(DrivingSimulation):
 
         # For additional cars
         if obj.isVehicle:
+            # Deliberately spawn other vehicles at rest, whatever velocity the
+            # scenario gives them: their behaviours (ACC/IDM) accelerate from
+            # standstill, and the collected RARLET results assume that.
+            vehicle_config["spawn_velocity"] = [0.0, 0.0]
+            vehicle_config["random_color"] = True
             metaDriveActor = self.client.engine.agent_manager.spawn_object(
                 DefaultVehicle,
                 vehicle_config=vehicle_config,
@@ -280,6 +355,7 @@ class MetaDriveSimulation(DrivingSimulation):
             if obj.isVehicle:
                 action = obj._prepare_action()
                 obj.metaDriveActor.before_step(action)
+                obj._reset_control()
             else:
                 # For Pedestrians
                 if obj._walking_direction is None:
@@ -295,10 +371,17 @@ class MetaDriveSimulation(DrivingSimulation):
     def step(self):
         start_time = time.monotonic()
 
-        # Special handling for the ego vehicle
+        # Special handling for the ego vehicle. A Scenic behaviour drives it
+        # through the normal action pipeline; otherwise the action comes from
+        # the gym loop via `self.actions`.
         ego_obj = self.objects[0]
-        action = ego_obj._prepare_action()
-        self.client.step(action)
+        if ego_obj.behavior is not None:
+            action = ego_obj._prepare_action()
+        else:
+            action = self._gym_action()
+        self.observation, _, _, _, self.info = self.client.step(action)
+        self.reward = ego_obj.reward
+        ego_obj._reset_control()
 
         # Render the scene in 2D if needed
         if self.render and not self.render3D:
@@ -317,6 +400,38 @@ class MetaDriveSimulation(DrivingSimulation):
             if elapsed_time < self.timestep:
                 time.sleep(self.timestep - elapsed_time)
 
+    def _gym_action(self):
+        """Map the gym action to MetaDrive's [steer, throttle_brake].
+
+        A 1-D action is longitudinal only (steer held at 0), which is what the
+        platoon scenarios use; 2-D is [steer, throttle_brake]. No action yet
+        (before the first step) coasts.
+        """
+        if self.actions is None:
+            return [0.0, 0.0]
+        a = np.asarray(self.actions, dtype=float).ravel()
+        if a.size == 0:
+            return [0.0, 0.0]
+        if a.size == 1:
+            return [0.0, float(a[0])]
+        return [float(a[0]), float(a[1])]
+
+    # --- gym-facing accessors (used through scenic.gym callables) ---
+    def get_obs(self):
+        return self.observation
+
+    def get_info(self):
+        ego = self.scene.objects[0]
+        self.info["ego_pos"] = ego.position
+        self.info["ego_speed"] = ego.speed
+        return self.info
+
+    def get_reward(self):
+        return self.reward
+
+    def render(self):
+        return self.client.render()
+
     def destroy(self):
         if self.screen_record:
             filename = self.screen_record_filename or datetime.now().strftime(
@@ -333,11 +448,12 @@ class MetaDriveSimulation(DrivingSimulation):
             print(f"Saving screen recording to {path}")
             self.client.top_down_renderer.generate_gif(path, duration=duration_ms)
 
+        # Clear this scene's objects but keep the shared client alive for the
+        # next simulation; MetaDriveSimulator.destroy() closes it.
         if self.client and self.client.engine:
             object_ids = list(self.client.engine._spawned_objects.keys())
             if object_ids:
                 self.client.engine.agent_manager.clear_objects(object_ids)
-            self.client.close()
 
         super().destroy()
 

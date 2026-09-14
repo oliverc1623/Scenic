@@ -86,7 +86,7 @@ class ScenicGymEnv(gym.Env):
                             actions = yield observation, reward, done(), truncated(), info
                             break # a little unclean right here
 
-                        actions = yield observation, reward, done(), done(), info
+                        actions = yield observation, reward, done(), truncated(), info
                         simulation.actions = actions # TODO add action dict to simulation interfaces
    
             except ResetException:
@@ -119,5 +119,11 @@ class ScenicGymEnv(gym.Env):
         pass
 
     def close(self):
+        # Finalize the run loop first so the in-flight stepped simulation is
+        # cleaned up (veneer.endSimulation). Otherwise a second environment in
+        # the same process trips Scenic's one-simulation-at-a-time assertion.
+        if self.loop is not None:
+            self.loop.close()
+            self.loop = None
         self.simulator.destroy()
 
