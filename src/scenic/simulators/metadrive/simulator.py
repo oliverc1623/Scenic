@@ -223,7 +223,8 @@ class MetaDriveSimulation(DrivingSimulation):
 
         # Special handling for the ego vehicle
         ego_obj = self.scene.objects[0]
-        self.observation, _, _, _, self.info = self.client.step([self.actions[0], self.actions[1]])
+        # self.observation, _, _, _, self.info = self.client.step([self.actions[0], self.actions[1]])
+        self.observation, _, _, _, self.info = self.client.step(ego_obj._collect_action())
         self.reward = ego_obj.reward
         ego_obj._reset_control()
 
