@@ -224,6 +224,9 @@ class MetaDriveSimulation(DrivingSimulation):
         # Set by the gym loop (scenic.gym) each step; None when Scenic is driving
         # the ego through a behaviour instead.
         self.actions = None
+        # Latest ego pose, refreshed by updateObjects() and served by get_info().
+        self._ego_pos = None
+        self._ego_speed = None
         super().__init__(scene, timestep=timestep, **kwargs)
 
     # --- sensor helpers ---
@@ -416,14 +419,24 @@ class MetaDriveSimulation(DrivingSimulation):
             return [0.0, float(a[0])]
         return [float(a[0]), float(a[1])]
 
+    def updateObjects(self):
+        super().updateObjects()
+        # Snapshot the ego pose for get_info(). The gym loop reads info after
+        # the step that terminates the simulation, and by then Scenic's cleanup
+        # has swapped the object's dynamic proxy back to the original,
+        # pre-simulation object, which reports its spawn pose instead.
+        if self.objects:
+            ego = self.objects[0]
+            self._ego_pos = ego.position
+            self._ego_speed = ego.speed
+
     # --- gym-facing accessors (used through scenic.gym callables) ---
     def get_obs(self):
         return self.observation
 
     def get_info(self):
-        ego = self.scene.objects[0]
-        self.info["ego_pos"] = ego.position
-        self.info["ego_speed"] = ego.speed
+        self.info["ego_pos"] = self._ego_pos
+        self.info["ego_speed"] = self._ego_speed
         return self.info
 
     def get_reward(self):
