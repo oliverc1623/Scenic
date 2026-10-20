@@ -38,8 +38,18 @@ class MetaDriveSimulator(DrivingSimulator):
         render3D=False,
         sumo_map=None,
         real_time=True,
+        npc_spawn_velocity=False,
+        vehicle_dynamics=None,
     ):
+        """
+        npc_spawn_velocity: spawn non-ego vehicles with their Scenic velocity (legacy behavior spawns them at rest).
+        vehicle_dynamics: optional dict pinning MetaDrive's per-vehicle sampled parameters for every vehicle,
+            e.g. dict(max_engine_force=800, max_brake_force=150, max_speed_km_h=120). Legacy behavior samples
+            max_engine_force ~ U(750, 850) and max_brake_force ~ U(80, 180) per vehicle with an 80 km/h cap.
+        """
         super().__init__()
+        self.npc_spawn_velocity = npc_spawn_velocity
+        self.vehicle_dynamics = dict(vehicle_dynamics) if vehicle_dynamics else {}
         self.render = render
         self.render3D = render3D if render else False
         self.scenario_number = 0
@@ -106,6 +116,8 @@ class MetaDriveSimulator(DrivingSimulator):
             sumo_map_boundary=self.sumo_map_boundary,
             film_size=self.film_size,
             client=self.client,
+            npc_spawn_velocity=self.npc_spawn_velocity,
+            vehicle_dynamics=self.vehicle_dynamics,
             **kwargs,
         )
 
@@ -124,6 +136,8 @@ class MetaDriveSimulation(DrivingSimulation):
         sumo_map_boundary,
         film_size,
         client,
+        npc_spawn_velocity=False,
+        vehicle_dynamics=None,
         **kwargs,
     ):
         if len(scene.objects) == 0:
@@ -146,7 +160,11 @@ class MetaDriveSimulation(DrivingSimulation):
         self.sumo_map_boundary = sumo_map_boundary
         self.film_size = film_size
         self.client = client
-        self.observation, self.info = self.client.reset()
+        self.npc_spawn_velocity = npc_spawn_velocity
+        self.vehicle_dynamics = dict(vehicle_dynamics) if vehicle_dynamics else {}
+        self.dynamics_parameters = {}  # Scenic object name -> MetaDrive get_dynamics_parameters()
+        _, self.info = self.client.reset()
+        self.observation = None
         self.reward = 0.0
         self.actions = dict()
         super().__init__(scene, timestep=timestep, **kwargs)
@@ -168,17 +186,20 @@ class MetaDriveSimulation(DrivingSimulation):
             metadrive_objects = self.client.engine.get_objects()
             obj.metaDriveActor = list(metadrive_objects.values())[0]
             self.defined_ego = True
+            self._record_dynamics(obj)
             return
 
         # For additional cars
         if obj.isVehicle:
+            spawn_velocity = [obj.velocity.x, obj.velocity.y] if self.npc_spawn_velocity else [0, 0]
             metaDriveActor = self.client.engine.agent_manager.spawn_object(
                 DefaultVehicle,
-                vehicle_config=dict(spawn_velocity = [0, 0], random_color=True),
+                vehicle_config=dict(spawn_velocity=spawn_velocity, random_color=True),
                 position=converted_position,
                 heading=converted_heading,
             )
             obj.metaDriveActor = metaDriveActor
+            self._record_dynamics(obj)
             return
 
         # For pedestrians
@@ -195,6 +216,18 @@ class MetaDriveSimulation(DrivingSimulation):
         raise SimulationCreationError(
             f"Unsupported object type: {type(obj)} for object {obj}."
         )
+
+    def _record_dynamics(self, obj):
+        """Pin the vehicle's sampled dynamics parameters (if requested) and record what MetaDrive will use."""
+        actor = obj.metaDriveActor
+        if self.vehicle_dynamics:
+            # MetaDrive reads max_engine_force / max_brake_force / max_speed_km_h from the vehicle's own config on
+            # every step, so updating it after spawn takes effect (the global vehicle_config rejects these keys).
+            actor.update_config(self.vehicle_dynamics)
+        if hasattr(actor, "get_dynamics_parameters"):
+            params = dict(actor.get_dynamics_parameters())
+            params["max_speed_km_h"] = actor.max_speed_km_h
+            self.dynamics_parameters[getattr(obj, "name", None) or str(id(obj))] = params
 
     def executeActions(self, allActions):
         """Execute actions for all vehicles in the simulation."""
@@ -223,7 +256,11 @@ class MetaDriveSimulation(DrivingSimulation):
 
         # Special handling for the ego vehicle
         ego_obj = self.scene.objects[0]
-        self.observation, _, _, _, self.info = self.client.step([self.actions[0], self.actions[1]])
+        if self.actions is not None and len(self.actions) > 0:  # RL-controlled ego (set by ScenicGymEnv)
+            ego_action = [self.actions[0], self.actions[1]]
+        else:  # ego driven by its Scenic behavior (e.g. VerifAI falsification runs)
+            ego_action = ego_obj._collect_action()
+        self.observation, _, _, _, self.info = self.client.step(ego_action)
         self.reward = ego_obj.reward
         ego_obj._reset_control()
 
@@ -241,8 +278,25 @@ class MetaDriveSimulation(DrivingSimulation):
                 time.sleep(self.timestep - elapsed_time)
 
     def get_obs(self):
+        # get vector of all vehicle states
+        ego_obj = self.scene.objects[0]
+        ego_state = self.getProperties(ego_obj, None)
+        ego_vector = []
+        ego_vector.extend(ego_state["position"])
+        ego_vector.extend(ego_state["velocity"])
+
+        other_states = []
+        for obj in self.scene.objects[1:]:
+            if obj.isVehicle:
+                other_state = self.getProperties(obj, None)
+                other_vector = []
+                other_vector.extend(other_state["position"])
+                other_vector.extend(other_state["velocity"])
+                other_states.extend(other_vector)
+        full_vector = np.array(ego_vector + other_states, dtype=np.float32)
+        self.observation = full_vector
         return self.observation
-    
+
     def render(self):
         return self.client.render()
 

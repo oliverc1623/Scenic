@@ -1,4 +1,5 @@
 from pathlib import Path
+import time
 from scenic.core.simulators import Simulator, Simulation
 from scenic.core.scenarios import Scenario
 import gymnasium as gym
@@ -7,6 +8,7 @@ from typing import Callable
 import numpy as np
 import csv
 import os
+import random
 from rarlet import falsifier
 
 #TODO make ResetException
@@ -24,6 +26,7 @@ class ScenicGymEnv(gym.Env):
                  scenario : Scenario,
                  simulator : Simulator,
                  seed: int = 1,
+                 output_dir : str = "results/preliminary/sac",
                  render_mode=None, 
                  max_steps = 1000,
                  observation_space : spaces.Dict = spaces.Dict(),
@@ -39,13 +42,21 @@ class ScenicGymEnv(gym.Env):
         self.scenario = scenario
         self.simulation_results = []
         self.seed = seed
-        self.distance_monitor = falsifier.Distance(route=f"results/sac/seed_{self.seed}") # TODO make route an argument
+        self.output_dir = output_dir
+        Path.mkdir(Path(output_dir), exist_ok=True)
+        Path.mkdir(Path(f"{output_dir}/seed_{self.seed}"), exist_ok=True)
+        self.distance_monitor = falsifier.Distance(route=f"{self.output_dir}/seed_{self.seed}")
         self.mapped_actions = []
+        self.times = []
 
         self.feedback_result = None
         self.loop = None
 
     def _make_run_loop(self):
+        # Scenic samples scenes with Python's `random` and numpy's global RNG; seed both per env so that
+        # vectorized workers (one seed each) don't draw identical scenes.
+        random.seed(self.seed)
+        np.random.seed(self.seed)
 
         while True:
             try:
@@ -58,9 +69,10 @@ class ScenicGymEnv(gym.Env):
                     truncated = lambda: (steps_taken >= self.max_steps) # TODO handle cases where it is done right on maxsteps
                     observation = simulation.get_obs()
                     info = simulation.get_info() 
+                    info["ego_reward"] = 0.0
                     actions = yield observation, info
                     simulation.actions = actions # TODO add action dict to simulation interfaces
-
+                    start_time = time.time()
                     while not done():
                         steering = actions[0]
                         acceleration = max(0, actions[1])
@@ -69,22 +81,27 @@ class ScenicGymEnv(gym.Env):
 
                         simulation.advance()
                         steps_taken += 1
+
                         observation = simulation.get_obs()
                         info = simulation.get_info()
                         reward = simulation.get_reward()
-                        
+
                         # Check termination status after getting reward
                         is_done = done()
                         is_truncated = truncated()
 
                         if is_done:
                             self.feedback_result = simulation.result
-                            final_reward = list(self.feedback_result.records.values())[-1]
+                            records = self.feedback_result.records
+                            # prefer the named record (`record final ego.reward as final_reward`); legacy scenarios
+                            # rely on the final record being inserted last
+                            final_reward = records["final_reward"] if "final_reward" in records else list(records.values())[-1]
                             if final_reward == 10:
+                                info["ego_reward"] = 10.0
                                 self.simulation_results.append(simulation.result)
                                 self.distance_monitor.specification(simulation, rl=True)
 
-                                actions_csv_path = Path(f"results/sac/seed_{self.seed}/actions_cex_{(self.distance_monitor.counterex-1):02d}.csv")
+                                actions_csv_path = Path(f"{self.output_dir}/seed_{self.seed}/actions_cex_{(self.distance_monitor.counterex-1):02d}.csv")
                                 actions_csv_path.parent.mkdir(parents=True, exist_ok=True)
                                 with Path.open(actions_csv_path, mode="w", newline="") as csv_file:
                                     csv_writer = csv.writer(csv_file)
